@@ -1,0 +1,15 @@
+.erlang.mk
+.DS_Store
+.eunit
+deps
+*.o
+*.d
+*.beam
+*.plt
+erl_crash.dump
+ebin
+rel/example_project
+_rel
+.concrete/DEV_MODE
+.rebar
+*.txt
