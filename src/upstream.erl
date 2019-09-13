@@ -10,7 +10,7 @@ start_link(Ref, Transport, Opts) ->
 
 init(Ref, Transport, _Opts = []) ->
 	{ok, Socket} = ranch:handshake(Ref),
-  Transport:setopts(Socket, [{active, once}]),
+  Transport:setopts(Socket, [{active, true},binary,{packet,line},{buffer,4096}]),
   upstream_manager:add_upstream(self()),
 	loop(Socket, Transport).
 
@@ -19,14 +19,20 @@ loop(Socket, Transport) ->
     stop ->
       Transport:close(Socket);
     {send_upstream,AllData} ->
-      Transport:send(Socket,jsx:encode(AllData)),
+      applog:verbose(?MODULE,"ToSocket:~p~n",[AllData]),
+      JsonData = jsx:encode(AllData),
+      Transport:send(Socket,<<JsonData/binary,"\n">>),
       loop(Socket,Transport);
     {tcp,Socket,Data} ->
-      applog:info(?MODULE,"~p~n",[Data]),
-      Json = jsx:decode(Data,[return_maps]),
-      #{<<"fcm_id">> := FcmId,<<"data">> := JsonData} = Json,
-      downstream:create(FcmId,JsonData),
-      Transport:setopts(Socket, [{active, once}]),
+      case jsx:is_json(Data) of
+        true ->
+          Json = jsx:decode(Data,[return_maps]),
+          applog:verbose(?MODULE,"FromSocket:~p~n",[Json]),
+          #{<<"fcm_id">> := FcmId,<<"data">> := JsonData} = Json,
+          downstream:create(FcmId,JsonData);
+        false ->
+          applog:error(?MODULE,"Invalid Json:~p~n",[Data])
+      end,
 			loop(Socket, Transport);
     {tcp_error,_,Reason} ->
       applog:error(?MODULE,"Error:~p~n",[Reason]),

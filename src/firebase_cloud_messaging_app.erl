@@ -5,6 +5,8 @@
 -export([stop/1]).
 
 start(_Type, _Args) ->
+  UnixSocket = filesettings:get(unix_socket,"/tmp/fcm.socket"),
+  os:cmd("rm " ++ UnixSocket),
   %--- Create ETS Tables ----
   ets_tables:create(),
   %--- Restore Settings ----
@@ -31,8 +33,6 @@ start(_Type, _Args) ->
     _ ->
       ok
   end, 
-  UnixSocket = filesettings:get(unix_socket,"/tmp/fcm.socket"),
-  _ = spawn(os,cmd,["rm " ++ UnixSocket]),
   {ok, _} = ranch:start_listener(firebase_cloud_messaging,
 		ranch_tcp, #{socket_opts => [{ip,{local,UnixSocket}},{port, 0}]},
 		upstream, []),

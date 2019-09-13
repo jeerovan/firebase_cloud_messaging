@@ -220,10 +220,11 @@ fcm(State) ->
           %-------- Check if its a control message about connection draining --------
           case maps:get(<<"message_type">>,AllData,notfound) of
             notfound ->
-              #{<<"message_id">> := Mid,<<"from">> := From,<<"data">> := #{<<"data">> := JsonData}} = AllData,
+              #{<<"message_id">> := Mid,<<"from">> := From,<<"data">> := #{<<"data">> := JsonDataString}} = AllData,
               Ack = get_ack_message(Mid,From),
               Acker ! {send_message,Ack},
               IncomingCounter = ets:update_counter(sequences,incoming_message_counter,{2,1},{incoming_message_counter,0}),
+              JsonData = jsx:decode(JsonDataString,[return_maps]),
               IncomingMessage = #{<<"type">> => <<"upstream_data">>,<<"fcm_id">> => From,<<"data">> => JsonData},
               ets:insert(incoming_message,{IncomingCounter,IncomingMessage});
             <<"ack">> ->
