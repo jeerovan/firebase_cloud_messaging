@@ -41,3 +41,11 @@ Erlang Implementation Of Firebase Cloud Messaging Through XMPP Servers
 - fcm_connection_monitor_interval_seconds : After how long monitor process should check fcm_process state and handle accordingly.
 - fcm_connection_limit : Maximum number of fcm_process to established when required.
 - fcm_sent_message_acking_wait_seconds : wait time for a particular message to be acknowledged before it is discarded.
+
+## Json Message Format Over TCP
+The tcp socket sends out following messages to the other end:
+- {type:upstream_data, fcm_id:FcmId, data:JsonDataFromTheDevice}
+- {type:fcm_id_updated, fcm_id:FcmId, old_fcm_id:OldFcmId}
+- {type:fcm_id_deregistered, fcm_id:FcmId}
+And accepts message in following format:
+  {fcm_id:FcmId, data:JsonDataToTheDevice}
