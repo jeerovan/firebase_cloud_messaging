@@ -30,3 +30,14 @@ Erlang Implementation Of Firebase Cloud Messaging Through XMPP Servers
 - Configurable Paramters To Control Throughput And Message Rate Per Device
 - Handles Connections With State `idle` Or `service unavailable`
 - Communicate with external application over tcp socket
+
+## Parameters
+- fcm_process_pool_upper_bound : Maxmium number of messages in the pool of fcm_process before it stops accepting further message.
+- fcm_process_pool_lower_bound : Minumum number of messages in the pool of fcm_prcess before it starts accepting new messages again.
+- default_timeout_idle_timeout_milli_seconds : Timeout process polls for new message to process. If there are none, it remains idel for these milli seconds.
+- fcm_connection_service_idle_timeout_seconds : If fcm_process is idle for timeout_seconds, it will be disconnected.
+- fcm_connection_service_unavailable_timeout_seconds : If fcm_process remains unavailable to process any message, it will disconnected after timeout_seconds.
+- fcm_general_message_delay_per_device_nano_seconds : You may even set a delay after consecutive message to be sent to a particular device.
+- fcm_connection_monitor_interval_seconds : After how long monitor process should check fcm_process state and handle accordingly.
+- fcm_connection_limit : Maximum number of fcm_process to established when required.
+- fcm_sent_message_acking_wait_seconds : wait time for a particular message to be acknowledged before it is discarded.
