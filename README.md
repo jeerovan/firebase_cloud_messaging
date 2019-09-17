@@ -11,7 +11,7 @@ Erlang Implementation Of Firebase Cloud Messaging Through XMPP Servers
 ## Setting Up
 - Install Erlang (Please Search Google)
 - Clone Repo
-- Execute Command `make` At Root Folder Location. This Will Download Required Dependencies.
+- Execute Command `make` At Root Folder Location. This Will Download Required Dependencies And Compile Them.
 - To Run In A Console, Execute `_rel/firebase_cloud_messaging_release/bin/firebase_cloud_messaging_release console`
 - Execute Command `q().` To Quit For Now.
 - You'll Have A Settings File Named : `settings.txt`. It Contains All The Settings You Can Configure To Establish Firebase XMPP Connections And Set Different Limits As Required.
@@ -31,7 +31,10 @@ Erlang Implementation Of Firebase Cloud Messaging Through XMPP Servers
 - Handles Connections With State `idle` Or `service unavailable`
 - Communicate with external application over tcp socket
 
-## Parameters
+## Setting Parameters
+- listen_on : either listen on unix_socket or http_port.
+- unxi_socket : unix_socket location, defaults to "/tmp/fcm.socket"
+- http_port : which port to listen on , defaults to 3000
 - fcm_process_pool_upper_bound : Maxmium number of messages in the pool of fcm_process before it stops accepting further message.
 - fcm_process_pool_lower_bound : Minumum number of messages in the pool of fcm_prcess before it starts accepting new messages again.
 - default_timeout_idle_timeout_milli_seconds : Timeout process polls for new message to process. If there are none, it remains idel for these milli seconds.
@@ -47,5 +50,6 @@ The tcp socket sends out following messages to the other end:
 - {type:upstream_data, fcm_id:FcmId, data:JsonDataFromTheDevice}
 - {type:fcm_id_updated, fcm_id:FcmId, old_fcm_id:OldFcmId}
 - {type:fcm_id_deregistered, fcm_id:FcmId}
+
 And accepts message in following format:
-  {fcm_id:FcmId, data:JsonDataToTheDevice}
+- {fcm_id:FcmId, data:JsonDataToTheDevice}

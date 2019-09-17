@@ -5,8 +5,10 @@
 -export([stop/1]).
 
 start(_Type, _Args) ->
+  %--- Clear The Unix Socket ---
   UnixSocket = filesettings:get(unix_socket,"/tmp/fcm.socket"),
   os:cmd("rm " ++ UnixSocket),
+  Port = filesettings:get(http_port,3000),
   %--- Create ETS Tables ----
   ets_tables:create(),
   %--- Restore Settings ----
@@ -33,8 +35,15 @@ start(_Type, _Args) ->
     _ ->
       ok
   end, 
+  ListenOn =
+    case filesettings:get(listen_on,"unix_socket") of
+      "unix_socket" ->
+        #{socket_opts => [{ip,{local,UnixSocket}},{port, 0}]};
+      "http_port" ->
+        Port
+    end,
   {ok, _} = ranch:start_listener(firebase_cloud_messaging,
-		ranch_tcp, #{socket_opts => [{ip,{local,UnixSocket}},{port, 0}]},
+		ranch_tcp, ListenOn,
 		upstream, []),
 	firebase_cloud_messaging_sup:start_link().
 

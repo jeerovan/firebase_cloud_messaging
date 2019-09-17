@@ -72,9 +72,9 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
   %--------- Irrelevant to This Module, Save File Settings -----
   Records = ets:tab2list(filesetting),
-  Format = fun(Term) -> io_lib:format("~w.~n", [Term]) end,
+  Format = fun(Term) -> io_lib:format("~p.~n", [Term]) end,
   Text = lists:map(Format, Records),
-  file:write_file("../../settings.txt", Text).
+  file:write_file("../../settings.txt", Text,[{encoding,utf8}]).
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
