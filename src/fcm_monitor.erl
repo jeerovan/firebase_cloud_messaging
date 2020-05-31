@@ -52,7 +52,7 @@ running(info,{fcm_state,From,CreatedAt,{FcmState,FcmStateAt}},Data) ->
   UnavailableTimeout = Data#data.service_unavailable_timeout,
   AliveTimeout = Data#data.service_alive_timeout,
   Now = erlang:system_time(seconds),
-  Expired = CreatedAt + AliveTimeout > Now,
+  Expired = CreatedAt + AliveTimeout < Now,
   case true of
     true when Expired ->
       applog:debug(?MODULE,"Disconnecting Fcm, Alive Timeout.~n",[]),
