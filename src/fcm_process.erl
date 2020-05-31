@@ -24,6 +24,7 @@ fcm(State) ->
             ssl:send(Socket,?INIT),
             State#{socket => Socket,
                    state => connecting,
+                   created => erlang:system_time(seconds),
                    connection_state => {init,erlang:system_time(seconds)},
                    upper_bound => UpperBound,
                    lower_bound => LowerBound,
@@ -296,8 +297,8 @@ fcm(State) ->
         end,
       fcm(NewState);
     {send_connection_state,From} ->
-      #{connection_state := ConnectionState} = State,
-      From ! {fcm_state,self(),ConnectionState},
+      #{connection_state := ConnectionState,created := CreatedAt} = State,
+      From ! {fcm_state,self(),CreatedAt,ConnectionState},
       fcm(State);
     send_stats ->
       #{pool := Pool} = State,

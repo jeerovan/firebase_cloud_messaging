@@ -14,6 +14,7 @@
 
 -record(data, {
                 monitor_interval,
+                service_alive_timeout,
                 service_idle_timeout,
                 service_unavailable_timeout
                 }).
@@ -36,7 +37,9 @@ init([]) ->
   MonitorInterval = filesettings:get(fcm_connection_monitor_interval_seconds,200) * 1000,
   ServiceIdleTimeout = filesettings:get(fcm_connection_service_idle_timeout_seconds,350),
   ServiceUnavailableTimeout = filesettings:get(fcm_connection_service_unavailable_timeout_seconds,500),
+  ServiceAliveTimeout = filesettings:get(fcm_connection_alive_timeout_seconds,900),
 	{ok, running, #data{monitor_interval = MonitorInterval,
+                      service_alive_timeout = ServiceAliveTimeout,
                       service_idle_timeout = ServiceIdleTimeout,
                       service_unavailable_timeout = ServiceUnavailableTimeout}}.
 
@@ -44,11 +47,16 @@ running(info,start,Data) ->
   MonitorInterval = Data#data.monitor_interval,
   {keep_state,Data,[{{timeout,monitor},MonitorInterval,running}]};
 
-running(info,{fcm_state,From,{FcmState,FcmStateAt}},Data) ->
+running(info,{fcm_state,From,CreatedAt,{FcmState,FcmStateAt}},Data) ->
   IdleTimeout = Data#data.service_idle_timeout,
   UnavailableTimeout = Data#data.service_unavailable_timeout,
+  AliveTimeout = Data#data.service_alive_timeout,
   Now = erlang:system_time(seconds),
+  Expired = CreatedAt + AliveTimeout > Now,
   case true of
+    true when Expired ->
+      applog:debug(?MODULE,"Disconnecting Fcm, Alive Timeout.~n",[]),
+      From ! disconnect;
     true when FcmState =:= active;FcmState =:= idle ->
       case Now - FcmStateAt > IdleTimeout of
         true ->
