@@ -5,10 +5,6 @@
 -export([stop/1]).
 
 start(_Type, _Args) ->
-  %--- Clear The Unix Socket ---
-  UnixSocket = filesettings:get(unix_socket,"/tmp/fcm.socket"),
-  os:cmd("rm " ++ UnixSocket),
-  Port = filesettings:get(http_port,3000),
   %--- Create ETS Tables ----
   ets_tables:create(),
   %--- Restore Settings ----
@@ -20,6 +16,10 @@ start(_Type, _Args) ->
         Lines
     end,
   [ets:insert(filesetting,Record) || Record <- Records],
+  %--- Clear The Unix Socket ---
+  UnixSocket = filesettings:get(unix_socket,"/tmp/fcm.socket"),
+  os:cmd("rm " ++ UnixSocket),
+  Port = filesettings:get(http_port,3000),
   %----- Check Settings ----
   SenderIdDummyDefault = fcm_sender_id@gcm_dot_googleapis_dot_com_in_double_quotes,
   SenderKeyDummyDefault = fcm_server_key_in_double_quotes,
