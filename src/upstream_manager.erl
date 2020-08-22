@@ -41,7 +41,7 @@ remove_upstream(Pid) ->
       ets:delete(upstream,Key),
       applog:info(?MODULE,"Removed Upstream Handler~n",[]);
     [] ->
-      applog:error(?MODULE,"Key Does Not Exists In upstream_id~n",[])
+      applog:error(?MODULE,"Key Not Found In upstream_id While Removing~n",[])
   end.
 
 %------ CASTS -----

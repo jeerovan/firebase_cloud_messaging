@@ -52,7 +52,7 @@ create_fcm_process() ->
       applog:error(?MODULE,"Fcm SenderId Or ServerKey Not Defined In settings.txt~n",[]);
     true ->
       R = spawn(fcm_process,fcm,[#{}]),
-      R ! connect
+      R ! start
   end.
 %----- We Make Direct Entries To DB Cause This Process May Not Be Alive Always ------
 add_fcm_process(Pid) ->

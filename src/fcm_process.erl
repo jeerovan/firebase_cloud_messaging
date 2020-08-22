@@ -13,27 +13,31 @@
 
 fcm(State) ->
   receive
-    connect ->
+    start ->
       gproc:reg({p,l,processes}),
       gproc:reg({p,l,fcm_process}),
+      self() ! connect,
+      fcm(State#{created => erlang:system_time(seconds),
+                 connection_state => {init,erlang:system_time(seconds)}});
+    connect ->
       UpperBound = filesettings:get(fcm_process_pool_upper_bound,95),
       LowerBound = filesettings:get(fcm_process_pool_lower_bound,50),
+      applog:info(?MODULE,"Connecting~n",[]),
       NewState =
         case ssl:connect(?HOST,5235,[binary,{active,true}]) of
           {ok,Socket} ->
             ssl:send(Socket,?INIT),
             State#{socket => Socket,
                    state => connecting,
-                   created => erlang:system_time(seconds),
                    connection_state => {init,erlang:system_time(seconds)},
                    upper_bound => UpperBound,
                    lower_bound => LowerBound,
-                   overflow => false,
                    pool => 0,
                    packet => <<>>};
           Error ->
-            self() ! disconnect,
-            applog:error(?MODULE,"Error Connecting SSL:~p~n",[Error]),
+            self() ! connect,
+            applog:info(?MODULE,"~p:Error Connecting:~p~n",[self(),Error]),
+            timer:sleep(5000),
             State#{state => connecting}
         end,
       fcm(NewState);
@@ -50,19 +54,20 @@ fcm(State) ->
                                        list_to_binary(filesettings:get(fcm_server_key,""))},
           B64 = base64:encode(<<0, ServerId/binary, 0, ServerPassword/binary>>),
           ssl:send(Socket,?AUTH_SASL(B64)),
-          State#{state => authenticating};
+          State;
         IsSuccess ->
           ssl:send(Socket,?INIT),
-          State#{state => binding};
+          State;
         IsBind ->
           ssl:send(Socket,?BIND),
           State;
         IsConnected ->
-          applog:info(?MODULE,"Connected~n",[]),
+          applog:info(?MODULE,"~p:Connected~n",[self()]),
           self() ! start_acker,
           State#{state => connected,
                  connection_state => {active,erlang:system_time(seconds)}};
         binary_part(Packet,{byte_size(Packet),-10}) =:= <<"</message>">> ->
+          applog:verbose(?MODULE,"~p:Received Ended Message:~p~n",[self(),Packet]),
           #{packet := PreviousPacket} = State,
           NewPacket = <<PreviousPacket/binary,Packet/binary>>,
           case re:run(NewPacket,">{(.*?)}<",[global,{capture,first,binary}]) of
@@ -73,6 +78,7 @@ fcm(State) ->
           end,
           State#{packet => <<>>};
         binary_part(Packet,{0,8}) =:= <<"<message">> ->
+          applog:verbose(?MODULE,"~p:Received Begun Message:~p~n",[self(),Packet]),
           #{packet := PreviousPacket} = State,
           NewPacket = <<PreviousPacket/binary,Packet/binary>>,
           State#{packet => NewPacket};
@@ -81,7 +87,7 @@ fcm(State) ->
           NewPacket = 
             case PreviousPacket of
               <<>> ->
-                applog:verbose(?MODULE,"Unhandled -> ~p~n",[Packet]),
+                applog:error(?MODULE,"~p:Unhandled -> ~p~n",[self(),Packet]),
                 <<>>;
               _ ->
                 <<PreviousPacket/binary,Packet/binary>>
@@ -92,21 +98,9 @@ fcm(State) ->
     {ssl_closed,_} ->
       fcm_manager:remove_fcm_process(self()),
       #{state := S} = State,
-      case S of
-        disconnected ->
-          self() ! disconnect;
-        connecting ->
-          self() ! disconnect;
-        authenticating ->
-          self() ! disconnect;
-        binding ->
-          self() ! disconnect;
-        connected ->
-          self() ! reconnect;
-        closing ->
-          self() ! reconnect
-      end,
-      fcm(State#{state => disconnected});
+      applog:error(?MODULE,"~p:SSL closed,Reconnting After ~p State~n",[self(),S]),
+      self() ! reconnect,
+      fcm(State);
     start_acker ->
       #{socket := Socket} = State,
       Acker = spawn(fcm_acker,acker,[Socket]),
@@ -116,7 +110,7 @@ fcm(State) ->
       #{state := S,pool := Pool,acker := Acker} = State,
       case true of
         true when S =:= connected, Pool < 99 ->
-          applog:verbose('OUT',"~p~n",[DataMap]),
+          applog:verbose(out,"~p~n",[DataMap]),
           Map = get_message_map(FcmId,DataMap),
           Acker ! {send_message,Map},
           timeout:update_fcm_id_send_time(FcmId,false);
@@ -126,68 +120,60 @@ fcm(State) ->
       fcm(State);
     unreserve_pool ->
       #{pool := Pool,
-        overflow := Overflow,
         lower_bound := PoolLowerBound,
         state := Status} = State,
-      NewPool = if Pool =:= 0 -> 0; true -> Pool - 1 end,
-      NewState =
-        case true of
-          true when NewPool =:= 0, Status =:= closing ->
-            applog:info(?MODULE,"Was Closing, Pool Became Zero,Disconnecting~n",[]),
-            self() ! disconnect,
-            State;
-          true when NewPool < PoolLowerBound, Overflow =:= true, Status =/= closing ->
-            fcm_manager:add_fcm_process(self()),
-            State#{pool => NewPool,overflow => false};
-          true ->
-            State#{pool => NewPool}
-        end,
-      %---------- Send Stat ----------
-      fcm(NewState);
+      NewPool = if Pool > 0 -> Pool - 1; true -> 0 end,
+      case true of
+        true when NewPool =:= 0, Status =:= closing ->
+          applog:info(?MODULE,"~p:Was Closing, Pool Became Zero,reconnecting~n",[self()]),
+          self() ! reconnect;
+        true when NewPool < PoolLowerBound, Status =/= closing ->
+          fcm_manager:add_fcm_process(self());
+        true ->
+          ok
+      end,
+      fcm(State#{pool => NewPool});
     connection_closing ->
       fcm_manager:remove_fcm_process(self()),
       #{pool := Pool} = State,
       case Pool =:= 0 of
         true ->
-          self() ! disconnect;
+          self() ! reconnect;
         false ->
-          ok
+          applog:info(?MODULE,"~p->Connection Closing But Pool Not 0~n",[self()])
       end,
-      fcm(State#{state => closing});
-    connection_unavailable ->
-      fcm_manager:remove_fcm_process(self()),
-      fcm(State#{connection_state => {unavailable,erlang:system_time(seconds)}});
-    connection_available ->
-      fcm_manager:add_fcm_process(self()),
-      fcm(State#{connection_state => {idle,erlang:system_time(seconds)}});
+      fcm(State#{connection_state => {closing,erlang:system_time(seconds)},state => closing});
     reserve_pool ->
       #{pool := Pool, upper_bound := PoolUpperBound} = State,
       NewPool = Pool + 1,
-      NewState =
-        case NewPool > PoolUpperBound of
-          true ->
-            fcm_manager:remove_fcm_process(self()),
-            State#{pool => NewPool,overflow => true};
-          false ->
-            State#{pool => NewPool}
-        end,
-      fcm(NewState);
+      case NewPool > PoolUpperBound of
+        true ->
+          fcm_manager:remove_fcm_process(self());
+        false ->
+          ok
+      end,
+      fcm(State#{pool => NewPool});
     reconnect ->
+      %--- Stop Acker --
       Acker = maps:get(acker,State,notfound),
       case Acker of
         notfound ->
-          ok;
+          applog:error(?MODULE,"~p:Acker Not Found,Reconnecting~n",[self()]);
         _ ->
           Acker ! stop
       end,
-      gproc:unreg({p,l,processes}),
-      gproc:unreg({p,l,fcm_process}),
+      %--- Stop FCM Process --
+      Socket = maps:get(socket,State,notfound),
+      case Socket of
+        notfound ->
+          applog:error(?MODULE,"~p:Socket Not Found While Reconnecting~n",[self()]);
+        _ ->
+          applog:info(?MODULE,"~p:Closing SSL.~n",[self()]),
+          fcm_manager:remove_fcm_process(self()),
+          ssl:close(Socket)
+      end,
       self() ! connect,
-      fcm(State#{acker => notfound});
-    {ssl_error, _, Reason} ->
-      applog:error(?MODULE,"Socket Error : ~p~n",[Reason]),
-      self() ! disconnect,
-      fcm(State);
+      fcm(State#{state => connecting,acker => notfound,socket => notfound});
     disconnect ->
       %--- Stop Acker --
       Acker = maps:get(acker,State,notfound),
@@ -197,21 +183,17 @@ fcm(State) ->
         _ ->
           Acker ! stop
       end,
-      %--- Stop FCM Process --
-      Socket = maps:get(socket,State,notfound),
-      case Socket of
+      case maps:get(socket,State,notfound) of
         notfound ->
           ok;
-        _ ->
-          applog:info(?MODULE,"Disconnecting.~n",[]),
+        Socket ->
+          fcm_manager:remove_fcm_process(self()),
           ssl:close(Socket)
-      end,
-      case maps:get(state,State,<<>>) of
-        connecting ->
-          ok;
-        _ ->
-          fcm_manager:create_fcm_process()
       end;
+    {ssl_error, _, Reason} ->
+      applog:error(?MODULE,"~p:SSL Error : ~p~n",[self(),Reason]),
+      self() ! reconnect,
+      fcm(State);
     {process_xml,XMLs} ->
       #{acker := Acker} = State,
       [ begin
@@ -248,38 +230,53 @@ fcm(State) ->
               self() ! unreserve_pool,
               #{<<"from">> := FcmId,<<"error">> := NackError,<<"message_id">> := NackedMessageId} = AllData,
               NackedMessageIdInt = binary_to_integer(NackedMessageId),
-              case NackError of
-                <<"DEVICE_UNREGISTERED">> ->
-                  IncomingMessage = #{<<"type">> => <<"fcm_id_deregistered">>,<<"fcm_id">> => FcmId},
-                  IncomingCounter = ets:update_counter(sequences,incoming_message_counter,{2,1},{incoming_message_counter,0}),
-                  ets:insert(incoming_message,{IncomingCounter,IncomingMessage}),
-                  fcm_manager:set_device_unregistered(FcmId);
-                <<"INTERNAL_SERVER_ERROR">> ->
-                  applog:error(?MODULE,"Internal Server Error While Processing:~p~n",[AllData]),
-                  self() ! connection_closing;
-                <<"SERVICE_UNAVAILABLE">> ->
-                  %------- Try To Resend Nacked Message -----
-                  case ets:lookup(fcm_sent_messages,NackedMessageIdInt) of
-                    [] ->
-                      ok;
-                    [{NackedMessageIdInt,FcmId,DataMap,_SentAt}] ->
-                      %------- Do Not Re-Use MessageIds,They Are Unique To FcmConnection-----
-                      downstream:create(FcmId,DataMap)
-                  end,
-                  applog:error(?MODULE,"Service Unavailable~n",[]),
-                  self() ! connection_unavailable;
-                <<"DEVICE_MESSAGE_RATE_EXCEEDED">> ->
-                  applog:error(?MODULE,"Device Message Rate Exceeded For:~p~n",[FcmId]),
-                  timeout:update_fcm_id_send_time(FcmId,true);
-                _ ->
-                  applog:error(?MODULE,"UNHANDLED NACK ERROR:~p~nData:~p~n",[NackError,AllData])
+              ShouldRetry =
+                case NackError of
+                  <<"DEVICE_UNREGISTERED">> ->
+                    IncomingMessage = #{<<"type">> => <<"fcm_id_deregistered">>,<<"fcm_id">> => FcmId},
+                    IncomingCounter = ets:update_counter(sequences,incoming_message_counter,{2,1},{incoming_message_counter,0}),
+                    ets:insert(incoming_message,{IncomingCounter,IncomingMessage}),
+                    fcm_manager:set_device_unregistered(FcmId),
+                    false;
+                  <<"INTERNAL_SERVER_ERROR">> ->
+                    applog:error(?MODULE,"~p:Internal Server Error While Processing:~p~n",[self(),AllData]),
+                    self() ! connection_closing,
+                    true;
+                  <<"CONNECTION_DRAINING">> ->
+                    applog:error(?MODULE,"~p:Connection Draining~n",[self()]),
+                    self() ! connection_closing,
+                    true;
+                  <<"SERVICE_UNAVAILABLE">> ->
+                    applog:error(?MODULE,"~p:Service Unavailable~n",[self()]),
+                    self() ! connection_closing,
+                    true;
+                  <<"DEVICE_MESSAGE_RATE_EXCEEDED">> ->
+                    applog:error(?MODULE,"~p:Device Message Rate Exceeded For:~p~n",[self(),FcmId]),
+                    timeout:update_fcm_id_send_time(FcmId,true),
+                    false;
+                  _ ->
+                    applog:error(?MODULE,"UNHANDLED NACK ERROR:~p~nData:~p~n",[NackError,AllData]),
+                    false
+                end,
+              case ShouldRetry of
+                true ->
+                %------- Try To Resend Nacked Message -----
+                case ets:lookup(fcm_sent_messages,NackedMessageIdInt) of
+                  [] ->
+                    ok;
+                  [{NackedMessageIdInt,FcmId,DataMap,_SentAt}] ->
+                    %------- Do Not Re-Use MessageIds,They Are Unique To FcmConnection-----
+                    downstream:create(FcmId,DataMap)
+                end;
+                false ->
+                  ok
               end,
               ets:delete(fcm_sent_messages,NackedMessageIdInt);
             <<"control">> ->
-              applog:error(?MODULE,"Received CONTROL, Disconnecting.~n",[]),
+              applog:error(?MODULE,"~p:Received CONTROL, Disconnecting.~n",[self()]),
               self() ! connection_closing;
             UnknownMessageType ->
-              applog:error(?MODULE,"Unknown message_type On FCM:~p~n",[UnknownMessageType])
+              applog:error(?MODULE,"Unknown message_type:~p~n",[UnknownMessageType])
           end
         end
         ||
@@ -287,12 +284,10 @@ fcm(State) ->
       fcm(State#{connection_state => {active,erlang:system_time(seconds)}});
     {application_variable_update,Name,Value} ->
       NewState =
-        case Name of
-          fcm_process_pool_upper_bound ->
-            State#{upper_bound => Value};
-          fcm_process_pool_lower_bound ->
-            State#{lower_bound => Value};
-          _ ->
+        case maps:is_key(Name,State) of
+          true ->
+            State#{Name => Value};
+          false ->
             State
         end,
       fcm(NewState);
@@ -305,8 +300,7 @@ fcm(State) ->
       gproc:send({p,l,statsocket},{fcm_process,self(),Pool}),
       fcm(State);
     Unknown ->
-      applog:error(?MODULE,"Unknown Message On FCM Process : ~p~n",[Unknown]),
-      self() ! disconnect,
+      applog:error(?MODULE,"Unknown Message:~p~n",[Unknown]),
       fcm(State)
   end.
 

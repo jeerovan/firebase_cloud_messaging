@@ -16,7 +16,7 @@
                 monitor_interval,
                 service_alive_timeout,
                 service_idle_timeout,
-                service_unavailable_timeout
+                service_closing_timeout
                 }).
 
 %% API.
@@ -35,13 +35,13 @@ init([]) ->
   applog:info(?MODULE,"Started~n",[]),
   self() ! start,
   MonitorInterval = filesettings:get(fcm_connection_monitor_interval_seconds,200) * 1000,
-  ServiceIdleTimeout = filesettings:get(fcm_connection_service_idle_timeout_seconds,350),
-  ServiceUnavailableTimeout = filesettings:get(fcm_connection_service_unavailable_timeout_seconds,500),
-  ServiceAliveTimeout = filesettings:get(fcm_connection_alive_timeout_seconds,900),
+  ServiceIdleTimeout = filesettings:get(fcm_connection_service_idle_timeout_seconds,300),
+  ServiceClosingTimeout = filesettings:get(fcm_connection_service_closing_timeout_seconds,500),
+  ServiceAliveTimeout = filesettings:get(fcm_connection_alive_timeout_seconds,1800),
 	{ok, running, #data{monitor_interval = MonitorInterval,
                       service_alive_timeout = ServiceAliveTimeout,
                       service_idle_timeout = ServiceIdleTimeout,
-                      service_unavailable_timeout = ServiceUnavailableTimeout}}.
+                      service_closing_timeout = ServiceClosingTimeout}}.
 
 running(info,start,Data) ->
   MonitorInterval = Data#data.monitor_interval,
@@ -49,27 +49,27 @@ running(info,start,Data) ->
 
 running(info,{fcm_state,From,CreatedAt,{FcmState,FcmStateAt}},Data) ->
   IdleTimeout = Data#data.service_idle_timeout,
-  UnavailableTimeout = Data#data.service_unavailable_timeout,
+  ClosingTimeout = Data#data.service_closing_timeout,
   AliveTimeout = Data#data.service_alive_timeout,
   Now = erlang:system_time(seconds),
   Expired = CreatedAt + AliveTimeout < Now,
   case true of
     true when Expired ->
-      applog:debug(?MODULE,"Disconnecting Fcm, Alive Timeout.~n",[]),
-      From ! disconnect;
+      applog:debug(?MODULE,"~p:Reconnecting, Alive Timeout.~n",[From]),
+      From ! reconnect;
     true when FcmState =:= active;FcmState =:= idle ->
       case Now - FcmStateAt > IdleTimeout of
         true ->
-          applog:info(?MODULE,"Disconnecting IDLE Fcm.~n",[]),
-          From ! disconnect;
+          applog:info(?MODULE,"~p:Reconnecting Idle.~n",[From]),
+          From ! reconnect;
         false ->
           ok
       end;
-    true when FcmState =:= unavailable ->
-      case Now - FcmStateAt > UnavailableTimeout of
+    true when FcmState =:= closing ->
+      case Now - FcmStateAt > ClosingTimeout of
         true ->
-          applog:info(?MODULE,"Making Connection Available.~n",[]),
-          From ! connection_available;
+          applog:info(?MODULE,"~p:Reconnecting Closing.~n",[From]),
+          From ! reconnect;
         false ->
           ok
       end;
@@ -90,7 +90,7 @@ handle_event(_EventType, _EventData, StateName, StateData) ->
 	{next_state, StateName, StateData}.
 
 terminate(_Reason, _StateName, _StateData) ->
-	ok.
+  ok.
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
 	{ok, StateName, StateData}.

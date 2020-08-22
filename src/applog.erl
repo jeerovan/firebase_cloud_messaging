@@ -1,8 +1,6 @@
 -module(applog).
 -behaviour(gen_server).
 
-%--- Just A Logging Server ------
-
 %% API.
 -export([start_link/0]).
 -export([info/3,verbose/3,debug/3,error/3]).
@@ -47,6 +45,7 @@ error(Module,Message,Args) ->
 
 init([]) ->
   %------- Add It To Gproc -------
+  process_flag(trap_exit, true),
   gproc:reg({p,l,processes}),
   Verbose = filesettings:get(log_verbose,true),
   Info = filesettings:get(log_info,true),
@@ -63,7 +62,7 @@ handle_call(_Request, _From, State) ->
 handle_cast({info,Message,Args},State) ->
   case State#state.log_info of
     true ->
-      io:format(Message,Args);
+      write_on_console(info,io_lib:format(Message,Args));
     false ->
       ok
   end,
@@ -71,7 +70,7 @@ handle_cast({info,Message,Args},State) ->
 handle_cast({verbose,Message,Args},State) ->
   case State#state.log_verbose of
     true ->
-      io:format(Message,Args);
+      write_on_console(verbose,io_lib:format(Message,Args));
     false ->
       ok
   end,
@@ -79,7 +78,7 @@ handle_cast({verbose,Message,Args},State) ->
 handle_cast({debug,Message,Args},State) ->
   case State#state.log_debug of
     true ->
-      io:format(Message,Args);
+      write_on_console(debug,io_lib:format(Message,Args));
     false ->
       ok
   end,
@@ -87,13 +86,25 @@ handle_cast({debug,Message,Args},State) ->
 handle_cast({error,Message,Args},State) ->
   case State#state.log_error of
     true ->
-      io:format(Message,Args);
+      write_on_console(error,io_lib:format(Message,Args));
     false ->
       ok
   end,
   {noreply,State};
 handle_cast(_Msg, State) ->
 	{noreply, State}.
+
+write_on_console(LogType,Message) ->
+  case LogType of
+    verbose ->
+      io:format("~s",[Message]);
+    info ->
+      io:format("~s",[color:green(Message)]);
+    debug ->
+      io:format("~s",[color:blue(Message)]);
+    error ->
+      io:format("~s",[color:red(Message)])
+  end.
 
 handle_info({application_variable_update,Name,Value},State) ->
   NewState =

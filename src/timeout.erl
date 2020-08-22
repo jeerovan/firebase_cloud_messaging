@@ -121,7 +121,11 @@ handle_event(_EventType, _EventData, StateName, StateData) ->
 	{next_state, StateName, StateData}.
 
 terminate(_Reason, _StateName, _StateData) ->
-	ok.
+   %--------- Irrelevant to This Module, Save File Settings -----
+  Records = ets:tab2list(filesetting),
+  Format = fun(Term) -> io_lib:format("~p.~n", [Term]) end,
+  Text = lists:map(Format, Records),
+  file:write_file("../../settings.txt", Text).
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
 	{ok, StateName, StateData}.
