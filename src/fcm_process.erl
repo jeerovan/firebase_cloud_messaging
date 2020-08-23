@@ -29,6 +29,7 @@ fcm(State) ->
             ssl:send(Socket,?INIT),
             State#{socket => Socket,
                    state => connecting,
+                   created => erlang:system_time(seconds),
                    connection_state => {init,erlang:system_time(seconds)},
                    upper_bound => UpperBound,
                    lower_bound => LowerBound,
