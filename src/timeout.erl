@@ -88,20 +88,20 @@ running(info,check,State) ->
             [{_FcmId,[]}] ->
               ets:delete(timeout_fcm_id,First);
             [{FcmId,Counters}] ->
-              case get_fcm_message_map(lists:reverse(Counters),[],[],normal) of
+              case get_fcm_message_map(lists:reverse(Counters),[],[]) of
                 {[],[]} ->
                   ets:delete(timeout_fcm_id,First);
                 {DCIDs,[]} ->
                   ets:delete(timeout_fcm_id,First),
                   downstream:delete(FcmId,DCIDs);
-                {CIDs,FcmMaps} ->
+                {CIDs,[FcmMap]} ->
                   case fcm_manager:get_fcm_process() of
                     no_one ->
                       ok;
                     FPID ->
                       ets:delete(timeout_fcm_id,First),
                       downstream:delete(FcmId,CIDs),
-                      FPID ! {send_message,FcmId,FcmMaps}
+                      FPID ! {send_message,FcmId,FcmMap}
                   end
               end
           end,
@@ -130,31 +130,14 @@ terminate(_Reason, _StateName, _StateData) ->
 code_change(_OldVsn, StateName, StateData, _Extra) ->
 	{ok, StateName, StateData}.
 
-get_fcm_message_map([Counter|Counters],CIDs,ReturnMap,Priority) ->
-  {NewCounters,NewCIDs,NewReturnMap,NewPriority} =
+get_fcm_message_map([Counter|Counters],CIDs,ReturnMap) ->
+  {NewCounters,NewCIDs,NewReturnMap} =
     case ets:lookup(outgoing_message,Counter) of
       [] ->
-        {Counters,[Counter|CIDs],ReturnMap,Priority};
+        {Counters,[Counter|CIDs],ReturnMap};
       [{Counter,DataMap}] ->
-        case byte_size(jsx:encode([DataMap|ReturnMap])) > 4000 of
-          true ->
-            {[],CIDs,ReturnMap,Priority};
-          false ->
-            MapPriority =
-              case Priority of
-                high ->
-                  high;
-                normal ->
-                  maps:get(priority,DataMap,normal)
-              end,
-            {Counters,[Counter|CIDs],[DataMap|ReturnMap],MapPriority}
-        end
+        {[],[Counter|CIDs],[DataMap]}
     end,
-  get_fcm_message_map(NewCounters,NewCIDs,NewReturnMap,NewPriority);
-get_fcm_message_map([],CIDs,ReturnMap,Priority) ->
-  case ReturnMap of
-    [] ->
-      {CIDs,[]};
-    _ ->
-      {CIDs,#{messages => ReturnMap, priority => Priority}}
-  end.
+  get_fcm_message_map(NewCounters,NewCIDs,NewReturnMap);
+get_fcm_message_map([],CIDs,ReturnMap) ->
+  {CIDs,ReturnMap}.

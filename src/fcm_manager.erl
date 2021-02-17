@@ -58,7 +58,7 @@ create_fcm_process() ->
 add_fcm_process(Pid) ->
   case ets:member(fcm_process_id,Pid) of
     true ->
-      applog:error(?MODULE,"Key Already Exists In FCM PROCESS ID~n",[]);
+      applog:info(?MODULE,"Key Already Exists In FCM PROCESS ID~n",[]);
     false ->
       NextNumber = ets:update_counter(sequences,fcm_process_counter,{2,1},{fcm_process_counter,0}),
       ets:insert(fcm_process_id,{Pid,NextNumber}),
