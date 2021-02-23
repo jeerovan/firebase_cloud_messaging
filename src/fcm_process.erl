@@ -320,11 +320,11 @@ get_message_map(FcmId,DataMap) ->
   SendingAt = erlang:system_time(seconds),
   ets:insert(fcm_sent_messages,{MidInt,FcmId,DataMap,SendingAt}),
   %----- Validate These On Receiving DataMap -------
-  Priority = maps:get(priority,DataMap,normal),
-  Json = #{to => FcmId,
-           message_id => MID,
-           data => DataMap,
-           priority => Priority,
-           time_to_live => 0},
+  Priority = maps:get(<<"priority">>,DataMap,<<"normal">>),
+  Json = #{<<"to">> => FcmId,
+           <<"message_id">> => MID,
+           <<"data">> => DataMap,
+           <<"priority">> => Priority,
+           <<"time_to_live">> => 0},
   Payload = jsx:encode(Json),
   <<"<message id='",MID/binary,"'><gcm xmlns='google:mobile:data'>",Payload/binary,"</gcm></message>">>.
